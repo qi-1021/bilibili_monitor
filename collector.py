@@ -2,8 +2,11 @@ import time
 import sqlite3
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
+
+# --- 时区设置 ---
+CST = timezone(timedelta(hours=8)) # 中国标准时间 (东八区)
 
 # --- 配置与数据库 ---
 def get_db_path():
@@ -77,7 +80,7 @@ def task():
                 time.sleep(10)
                 continue
 
-            now = datetime.now()
+            now = datetime.now(CST)
             for bvid, title in active_videos:
                 data = get_video_stats(bvid)
                 if data:

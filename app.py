@@ -6,8 +6,11 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
+
+# --- 时区设置 ---
+CST = timezone(timedelta(hours=8)) # 中国标准时间 (东八区)
 
 # 设置页面配置 (绝对第一位)
 st.set_page_config(
@@ -193,7 +196,7 @@ init_db()
 if 'monitoring' not in st.session_state: st.session_state.monitoring = False
 
 st.title("📈 B站实时监测 (全设备适配版)")
-st.caption(f"🕒 本次更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"🕒 本次更新: {datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')}")
 
 with st.sidebar:
     st.header("1. 监测控制")
@@ -242,7 +245,7 @@ active_tracked = get_tracked_videos(only_active=True)
 if not active_tracked:
     st.info("👈 请在左侧点击项目图标（📁 -> ✅）来激活实时对比。")
 else:
-    now = datetime.now()
+    now = datetime.now(CST)
     df_history = get_history(limit=2000)
     current_batch = []
     
