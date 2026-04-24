@@ -215,21 +215,20 @@ else:
         st.divider()
         c_l, c_r = st.columns(2)
         
-        # 先进行数据去重，防止重复索引报错
-        df_plot = df_history.drop_duplicates(subset=['datetime_dt', '视频标题'], keep='last')
-        
+        # 使用透视表 (Wide Format) 是 Streamlit 图表最稳定的展示方式，能有效避免云端渲染报错
         with c_l:
             st.markdown("**1. 评论数增长趋势**")
             try:
-                # 使用原生时间轴展示绝对时间
-                st.line_chart(df_plot, x='datetime_dt', y='评论数', color='视频标题', height=400)
+                chart_data_total = df_history.pivot_table(index='datetime_dt', columns='视频标题', values='评论数', aggfunc='last')
+                st.line_chart(chart_data_total, height=400)
             except Exception as e:
                 st.error(f"图表 1 渲染失败: {e}")
                 
         with c_r:
             st.markdown("**2. 评论发布速度**")
             try:
-                st.line_chart(df_plot, x='datetime_dt', y='评论增速', color='视频标题', height=400)
+                chart_data_growth = df_history.pivot_table(index='datetime_dt', columns='视频标题', values='评论增速', aggfunc='last')
+                st.line_chart(chart_data_growth, height=400)
             except Exception as e:
                 st.error(f"图表 2 渲染失败: {e}")
         
