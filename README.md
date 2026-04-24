@@ -1,5 +1,5 @@
 ---
-title: Bilibili Monitor
+title: B站多视频实时趋势分析
 emoji: 📈
 colorFrom: blue
 colorTo: red
@@ -7,6 +7,11 @@ sdk: streamlit
 sdk_version: 1.31.0
 app_file: app.py
 pinned: false
+license: apache-2.0
+tags:
+  - b站
+  - 实时监控
+  - 数据分析
 ---
 
 # B站多视频实时趋势分析工具 🚀
