@@ -18,26 +18,30 @@ def get_db_path():
 DB_PATH = get_db_path()
 
 def sync_and_detect_deletions(bvid, current_count):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT last_known_count, total_deleted FROM tracked_videos WHERE bvid = ?', (bvid,))
-    row = cursor.fetchone()
-    if row:
-        last_count, current_total_del = row
-        if last_count == 0 and current_total_del == 0:
-            cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
-        else:
-            if current_count < last_count:
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        cursor.execute('SELECT last_known_count FROM tracked_videos WHERE bvid = ?', (bvid,))
+        row = cursor.fetchone()
+        if row:
+            last_count = row[0]
+            if last_count <= 0:
+                cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
+            elif current_count < last_count:
                 diff = last_count - current_count
                 cursor.execute('UPDATE tracked_videos SET total_deleted = total_deleted + ?, last_known_count = ? WHERE bvid = ?', 
                                (diff, current_count, bvid))
             else:
                 cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Collector DB Error: {e}")
 
 def save_history(record):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     cursor.execute('INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 
                   (record['timestamp'], record['datetime'], record['bvid'], record['title'], 

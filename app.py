@@ -37,6 +37,7 @@ DB_PATH = get_db_path()
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL") # 开启 WAL 模式支持多进程并发
     cursor = conn.cursor()
     # 历史记录表
     cursor.execute('''CREATE TABLE IF NOT EXISTS history 
@@ -52,18 +53,16 @@ def init_db():
     # 迁移旧数据（如果缺少列）
     cursor.execute("PRAGMA table_info(tracked_videos)")
     cols = [col[1] for col in cursor.fetchall()]
-    if 'is_active' not in cols:
-        cursor.execute("ALTER TABLE tracked_videos ADD COLUMN is_active INTEGER DEFAULT 0")
-    if 'total_deleted' not in cols:
-        cursor.execute("ALTER TABLE tracked_videos ADD COLUMN total_deleted INTEGER DEFAULT 0")
-    if 'last_known_count' not in cols:
-        cursor.execute("ALTER TABLE tracked_videos ADD COLUMN last_known_count INTEGER DEFAULT 0")
+    for col_name in ['is_active', 'total_deleted', 'last_known_count']:
+        if col_name not in cols:
+            cursor.execute(f"ALTER TABLE tracked_videos ADD COLUMN {col_name} INTEGER DEFAULT 0")
     
     conn.commit()
     conn.close()
 
 def set_config(key, value):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, str(value)))
     conn.commit()
@@ -72,6 +71,7 @@ def set_config(key, value):
 def get_config(key, default=None):
     try:
         conn = sqlite3.connect(DB_PATH)
+        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
         row = cursor.fetchone()
@@ -81,6 +81,7 @@ def get_config(key, default=None):
 
 def add_tracked_video(bvid, title, is_active=1):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     # 保持原有的状态和计数
     cursor.execute('''INSERT OR IGNORE INTO tracked_videos (bvid, title, is_active, total_deleted, last_known_count) 
@@ -90,30 +91,35 @@ def add_tracked_video(bvid, title, is_active=1):
     conn.close()
 
 def sync_and_detect_deletions(bvid, current_count):
-    """最核心逻辑：使用持久化状态机对比，不依赖历史记录表"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # 获取上一次的真实记录
-    cursor.execute('SELECT last_known_count, total_deleted FROM tracked_videos WHERE bvid = ?', (bvid,))
-    row = cursor.fetchone()
-    
-    if row:
-        last_count, current_total_del = row
-        # 初始状态（如果是新添加的项目，先同步第一个数字）
-        if last_count == 0 and current_total_del == 0:
-            cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
-        else:
-            # 只有当开启监测且确实变少了
-            if current_count < last_count:
-                diff = last_count - current_count
-                cursor.execute('UPDATE tracked_videos SET total_deleted = total_deleted + ?, last_known_count = ? WHERE bvid = ?', 
-                               (diff, current_count, bvid))
-            else:
-                # 正常增长或持平，只同步最新状态
+    """持久化状态机：彻底解决监测断档问题"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10) # 增加超时等待
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT last_known_count FROM tracked_videos WHERE bvid = ?', (bvid,))
+        row = cursor.fetchone()
+        
+        if row:
+            last_count = row[0]
+            # 1. 初始化或异常恢复：如果上次是0，直接同步当前值作为基准
+            if last_count <= 0:
                 cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
-    
-    conn.commit()
-    conn.close()
+            # 2. 发现删评：当前值显著小于上次记录
+            elif current_count < last_count:
+                diff = last_count - current_count
+                # 累加删评总数，并同步最新计数值
+                cursor.execute('''UPDATE tracked_videos 
+                                 SET total_deleted = total_deleted + ?, last_known_count = ? 
+                                 WHERE bvid = ?''', (diff, current_count, bvid))
+            # 3. 正常增长：只同步最新计数值
+            else:
+                cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DB Error: {e}")
 
 def toggle_active_video(bvid, status):
     conn = sqlite3.connect(DB_PATH)
