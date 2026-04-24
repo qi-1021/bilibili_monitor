@@ -209,18 +209,20 @@ else:
                     if not prev_record.empty:
                         last = prev_record.iloc[-1]
                         time_diff = (now.timestamp() - last['timestamp']) / 60
-                        growth = (s['reply'] - last['评论数']) / time_diff if time_diff > 0 else 0
+                        # 计算本次真实变动
+                        current_diff = s['reply'] - last['评论数']
+                        growth = current_diff / time_diff if time_diff > 0 else 0
                         
-                        # 核心改进：实时检测删评并存入永久字段
-                        if s['reply'] < last['评论数']:
-                            deleted_diff = last['评论数'] - s['reply']
-                            update_deleted_count(v_bvid, deleted_diff)
+                        # 核心：精准捕捉删评
+                        if current_diff < 0:
+                            update_deleted_count(v_bvid, abs(current_diff))
                     
                     with cols[j]:
+                        # 绿色/红色 Delta 区显示本次新增/减少的绝对数量
                         st.metric(label=f"{data['title'][:10]}", 
                                   value=f"{s['reply']:,}", 
-                                  delta=f"{growth:.1f} 条/分")
-                        st.caption(f"🚀 增速: {growth:.1f}")
+                                  delta=f"{current_diff} 条" if not prev_record.empty else None)
+                        st.caption(f"🚀 实时增速: {growth:.1f} 条/分")
             
                     if st.session_state.monitoring:
                         current_batch.append({
