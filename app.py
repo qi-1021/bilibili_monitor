@@ -425,18 +425,33 @@ else:
             'template': 'plotly_dark' if st.get_option("theme.base") == "dark" else 'plotly_white'
         }
 
-        st.markdown("### 📈 深度趋势分析 (现实时间轴)")
+        col_title, col_toggle = st.columns([2, 1])
+        with col_title:
+            st.markdown("### 📈 深度趋势分析 (现实时间轴)")
+        with col_toggle:
+            use_net_change = st.toggle("🔍 开启『净增量』透视镜 (放大微小波动)", value=True, 
+                                       help="开启后，所有视频的起点将归零，专门放大展示新增或删减的净变化量，解决基数过大导致图表成直线的问题。")
         
         # 图表 1: 累计评论数趋势
         try:
-            fig1 = px.line(df_history, 
+            plot_df = df_history.copy()
+            y_col = '评论数'
+            y_title = "评论总量"
+            
+            if use_net_change:
+                # 核心逻辑：减去每个视频在当前时间窗口内的初始值，计算净增量
+                plot_df['净增量'] = plot_df.groupby('视频标题')['评论数'].transform(lambda x: x - x.iloc[0])
+                y_col = '净增量'
+                y_title = "评论净变化量 (相比初始观测)"
+
+            fig1 = px.line(plot_df, 
                           x='datetime_dt', 
-                          y='评论数', 
+                          y=y_col, 
                           color='视频标题',
-                          title='1. 累计评论数实时趋势',
-                          labels={'datetime_dt': '现实时间', '评论数': '总评论数'},
+                          title=f'1. 累计评论数实时趋势 ({ "净增量模式" if use_net_change else "绝对值模式" })',
+                          labels={'datetime_dt': '现实时间', y_col: y_title},
                           markers=True)
-            fig1.update_layout(xaxis_title="观测时间 (现实时间)", yaxis_title="评论总量", **chart_config)
+            fig1.update_layout(xaxis_title="观测时间 (现实时间)", yaxis_title=y_title, **chart_config)
             st.plotly_chart(fig1, use_container_width=True)
         except Exception as e:
             st.error(f"趋势图 1 异常: {e}")
