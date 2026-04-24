@@ -44,6 +44,9 @@ def init_db():
     # 长期对照库表 (增加 total_deleted 永久计数器)
     cursor.execute('''CREATE TABLE IF NOT EXISTS tracked_videos 
                      (bvid TEXT PRIMARY KEY, title TEXT, is_active INTEGER DEFAULT 0, total_deleted INTEGER DEFAULT 0)''')
+    # 全局设置表 (用于多端同步)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS settings 
+                     (key TEXT PRIMARY KEY, value TEXT)''')
     
     # 迁移旧数据（如果缺少列）
     cursor.execute("PRAGMA table_info(tracked_videos)")
@@ -55,6 +58,23 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def set_config(key, value):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, str(value)))
+    conn.commit()
+    conn.close()
+
+def get_config(key, default=None):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except: return default
 
 def add_tracked_video(bvid, title, is_active=1):
     conn = sqlite3.connect(DB_PATH)
@@ -148,7 +168,12 @@ st.caption(f"🕒 本次更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 with st.sidebar:
     st.header("1. 监测控制")
-    refresh_rate = st.select_slider("刷新频率 (秒)", options=[1, 2, 5, 10, 30, 60], value=5)
+    # 从数据库读取全局频率设置
+    saved_rate = int(get_config("refresh_rate", 5))
+    refresh_rate = st.select_slider("刷新频率 (秒)", options=[1, 2, 5, 10, 30, 60], value=saved_rate)
+    if refresh_rate != saved_rate:
+        set_config("refresh_rate", refresh_rate)
+    
     c1, c2 = st.columns(2)
     if c1.button("▶️ 开始", use_container_width=True): st.session_state.monitoring = True
     if c2.button("⏹️ 停止", use_container_width=True): st.session_state.monitoring = False
