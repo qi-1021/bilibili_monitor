@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  bili-monitor:
+    build: .
+    container_name: bilibili_monitor
+    ports:
+      - "8501:8501"
+    environment:
+      - MONITOR_BVIDS=BV1GJ411x7h7,BV1mY411u72u  # 在这里绑定你想要监测的视频
+      - MONITOR_INTERVAL=60                     # 监测间隔（秒）
+    volumes:
+      - ./data:/app/data                        # 映射数据目录，保证容器重启数据不丢失
+    restart: always

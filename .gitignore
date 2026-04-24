@@ -1,0 +1,11 @@
+*.zip
+*.tar.gz
+*.pyc
+__pycache__/
+data/
+*.log
+cpolar
+frp*
+test_ms_repo/
+id_ms*
+sync_to_ms.py
