@@ -269,7 +269,7 @@ else:
         for audit in audit_data:
             with st.expander(f"{audit['严重程度']} | {audit['标题'][:20]}... (累计删除 {audit['累计删评']} 条)", expanded=True):
                 c1, c2, c3 = st.columns(3)
-                c1.metric("累计被删评论", f"{audit['累计删评']} 条", border=True)
+                c1.metric("累计被删评论", f"{audit['累计删评']} 条")
                 c2.metric("删评率 (估算)", audit['删评占比'], delta="较历史平均" if "严重" in audit['严重程度'] else None, delta_color="inverse")
                 c3.write(f"**审计建议：**\n{ '该视频可能正在经历大规模人工干预或清评。' if '严重' in audit['严重程度'] else '属于正常的用户自删或平台过滤。' }")
                 
