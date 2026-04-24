@@ -215,8 +215,8 @@ else:
                         current_diff = s['reply'] - last['评论数']
                         growth = current_diff / time_diff if time_diff > 0 else 0
                         
-                        # 核心：精准捕捉删评
-                        if current_diff < 0:
+                        # 核心：精准捕捉删评 (仅在监测状态下记录，避免重复计算)
+                        if st.session_state.monitoring and current_diff < 0:
                             update_deleted_count(v_bvid, abs(current_diff))
                     
                     with cols[j]:
@@ -296,20 +296,31 @@ else:
         st.divider()
         c_l, c_r = st.columns(2)
         
-        # 使用透视表 (Wide Format) 是 Streamlit 图表最稳定的展示方式，能有效避免云端渲染报错
+        import altair as alt
+        
         with c_l:
             st.markdown("**1. 评论数增长趋势**")
             try:
-                chart_data_total = df_history.pivot_table(index='datetime_dt', columns='视频标题', values='评论数', aggfunc='last')
-                st.line_chart(chart_data_total, height=400)
+                chart1 = alt.Chart(df_history).mark_line().encode(
+                    x=alt.X('datetime_dt:T', title='现实时间'),
+                    y=alt.Y('评论数:Q', scale=alt.Scale(zero=False)),
+                    color='视频标题:N',
+                    tooltip=['datetime_dt:T', '视频标题:N', '评论数:Q']
+                ).properties(height=400)
+                st.altair_chart(chart1, use_container_width=True)
             except Exception as e:
                 st.error(f"图表 1 渲染失败: {e}")
                 
         with c_r:
             st.markdown("**2. 评论发布速度**")
             try:
-                chart_data_growth = df_history.pivot_table(index='datetime_dt', columns='视频标题', values='评论增速', aggfunc='last')
-                st.line_chart(chart_data_growth, height=400)
+                chart2 = alt.Chart(df_history).mark_line().encode(
+                    x=alt.X('datetime_dt:T', title='现实时间'),
+                    y=alt.Y('评论增速:Q', scale=alt.Scale(zero=False)),
+                    color='视频标题:N',
+                    tooltip=['datetime_dt:T', '视频标题:N', '评论增速:Q']
+                ).properties(height=400)
+                st.altair_chart(chart2, use_container_width=True)
             except Exception as e:
                 st.error(f"图表 2 渲染失败: {e}")
         
