@@ -326,15 +326,21 @@ else:
             if v_total_del > 50 or del_ratio > 5: severity = "🔴 严重清评"
             elif v_total_del > 10 or del_ratio > 1: severity = "🟡 疑似控评"
             
-            # 提取具体的删评记录用于展示
-            v_deletions = v_history[v_history['评论数'].diff() < 0].tail(5)
+            # 提取具体的删评记录，并计算单次删除数量
+            v_history['diff'] = v_history['评论数'].diff()
+            v_deletions = v_history[v_history['diff'] < 0].copy()
+            if not v_deletions.empty:
+                v_deletions['本次删除'] = v_deletions['diff'].abs().astype(int)
+                v_deletions_display = v_deletions[['datetime', '本次删除', '评论数']].tail(5)
+            else:
+                v_deletions_display = pd.DataFrame()
             
             audit_data.append({
                 '标题': v_title,
                 '累计删评': v_total_del,
                 '删评占比': f"{del_ratio:.2f}%",
                 '严重程度': severity,
-                'details': v_deletions[['datetime', '评论数']] if not v_deletions.empty else pd.DataFrame()
+                'details': v_deletions_display
             })
 
     if not audit_data:
@@ -344,12 +350,14 @@ else:
             with st.expander(f"{audit['严重程度']} | {audit['标题'][:20]}... (累计删除 {audit['累计删评']} 条)", expanded=True):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("累计被删评论", f"{audit['累计删评']} 条")
-                c2.metric("删评率 (估算)", audit['删评占比'])
-                c3.write(f"**审计建议：**\n{ '该视频可能正在经历大规模人工干预或清评。' if '严重' in audit['严重程度'] else '属于正常的用户自删或平台过滤。' }")
+                c2.metric("删评占比", audit['删评占比'])
+                c3.write(f"**数据分布特征：**\n该项目目前表现为“{audit['严重程度']}”特征。系统已捕捉到最近的流水明细如下，请根据观测到的规律自行研判。")
                 
                 if not audit['details'].empty:
-                    st.caption("🕒 最近删评快照")
-                    st.table(audit['details'])
+                    st.caption("🕒 最近删评明细 (负增长流水)")
+                    display_df = audit['details'].copy()
+                    display_df.columns = ['发生时间', '删除数量 (条)', '剩余评论总数']
+                    st.table(display_df)
 
     if not df_history.empty:
         st.divider()
