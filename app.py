@@ -12,6 +12,23 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 时区设置 ---
 CST = timezone(timedelta(hours=8)) # 中国标准时间 (东八区)
 
+import subprocess
+import sys
+
+# --- 强制唤醒后台守卫 ---
+# 云平台通常会忽略 start.sh 直接运行 app.py，我们必须在此强制启动后台进程
+@st.cache_resource
+def ensure_background_collector():
+    try:
+        # 使用子进程独立运行采集器
+        subprocess.Popen([sys.executable, "collector.py"])
+        print("🚀 [System] 成功从前端唤醒后台守护进程！")
+    except Exception as e:
+        print(f"⚠️ [System] 唤醒后台守护进程失败: {e}")
+    return True
+
+ensure_background_collector()
+
 # 设置页面配置 (绝对第一位)
 st.set_page_config(
     page_title="B站多视频实时趋势分析",
