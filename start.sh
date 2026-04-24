@@ -26,5 +26,8 @@ else
     pip install -r requirements.txt --quiet
 fi
 
+echo "⚙️ 正在启动 24/7 后台采集器..."
+python3 collector.py &
+
 echo "📊 环境就绪，正在运行 Streamlit 界面..."
-streamlit run app_advanced.py
+streamlit run app.py --server.port 7860 --server.address 0.0.0.0
