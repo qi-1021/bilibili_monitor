@@ -62,9 +62,21 @@ def get_video_stats(bvid):
     except: return None
     return None
 
+def update_heartbeat():
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        now_str = datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES ("collector_heartbeat", ?)', (now_str,))
+        conn.commit()
+        conn.close()
+    except: pass
+
 def task():
     while True:
         try:
+            update_heartbeat() # 记录心跳
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute('SELECT bvid, title FROM tracked_videos WHERE is_active = 1')

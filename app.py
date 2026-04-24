@@ -93,6 +93,18 @@ def add_tracked_video(bvid, title, is_active=1):
     conn.commit()
     conn.close()
 
+def update_heartbeat():
+    """在数据库记录心跳，证明后台采集器活着"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        now_str = datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES ("collector_heartbeat", ?)', (now_str,))
+        conn.commit()
+        conn.close()
+    except: pass
+
 def sync_and_detect_deletions(bvid, current_count):
     """持久化状态机：彻底解决监测断档问题"""
     try:
@@ -201,6 +213,21 @@ st.title("📈 B站实时监测 (全设备适配版)")
 st.caption(f"🕒 本次更新: {datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')}")
 
 with st.sidebar:
+    st.header("🛡️ 后台守卫状态")
+    last_hb = get_config("collector_heartbeat", "从未活跃")
+    is_alive = False
+    if last_hb != "从未活跃":
+        hb_time = datetime.strptime(last_hb, '%Y-%m-%d %H:%M:%S').replace(tzinfo=CST)
+        if (datetime.now(CST) - hb_time).total_seconds() < 60:
+            is_alive = True
+    
+    if is_alive:
+        st.success(f"● 正在运行 (最后活跃: {last_hb.split()[-1]})")
+    else:
+        st.error(f"○ 已停止 (最后活跃: {last_hb})")
+        st.warning("提示: 如果是在云端运行，请保持页面开启或使用 Ping 工具防休眠。")
+
+    st.divider()
     st.header("1. 监测控制")
     # 从数据库读取全局频率设置
     saved_rate = int(get_config("refresh_rate", 5))
