@@ -41,9 +41,10 @@ def init_db():
     # 历史记录表
     cursor.execute('''CREATE TABLE IF NOT EXISTS history 
                      (timestamp REAL, datetime TEXT, bvid TEXT, title TEXT, reply INTEGER, view INTEGER, likes INTEGER, growth REAL)''')
-    # 长期对照库表 (增加 total_deleted 永久计数器)
+    # 长期对照库表 (增加 total_deleted 永久计数器, last_known_count 状态机)
     cursor.execute('''CREATE TABLE IF NOT EXISTS tracked_videos 
-                     (bvid TEXT PRIMARY KEY, title TEXT, is_active INTEGER DEFAULT 0, total_deleted INTEGER DEFAULT 0)''')
+                     (bvid TEXT PRIMARY KEY, title TEXT, is_active INTEGER DEFAULT 0, 
+                      total_deleted INTEGER DEFAULT 0, last_known_count INTEGER DEFAULT 0)''')
     # 全局设置表 (用于多端同步)
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings 
                      (key TEXT PRIMARY KEY, value TEXT)''')
@@ -55,6 +56,8 @@ def init_db():
         cursor.execute("ALTER TABLE tracked_videos ADD COLUMN is_active INTEGER DEFAULT 0")
     if 'total_deleted' not in cols:
         cursor.execute("ALTER TABLE tracked_videos ADD COLUMN total_deleted INTEGER DEFAULT 0")
+    if 'last_known_count' not in cols:
+        cursor.execute("ALTER TABLE tracked_videos ADD COLUMN last_known_count INTEGER DEFAULT 0")
     
     conn.commit()
     conn.close()
@@ -79,16 +82,36 @@ def get_config(key, default=None):
 def add_tracked_video(bvid, title, is_active=1):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # 保持原有的 active 状态如果已存在
-    cursor.execute('INSERT OR IGNORE INTO tracked_videos (bvid, title, is_active, total_deleted) VALUES (?, ?, ?, 0)', (bvid, title, is_active))
+    # 保持原有的状态和计数
+    cursor.execute('''INSERT OR IGNORE INTO tracked_videos (bvid, title, is_active, total_deleted, last_known_count) 
+                      VALUES (?, ?, ?, 0, 0)''', (bvid, title, is_active))
     cursor.execute('UPDATE tracked_videos SET title = ?, is_active = ? WHERE bvid = ?', (title, is_active, bvid))
     conn.commit()
     conn.close()
 
-def update_deleted_count(bvid, count):
+def sync_and_detect_deletions(bvid, current_count):
+    """最核心逻辑：使用持久化状态机对比，不依赖历史记录表"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('UPDATE tracked_videos SET total_deleted = total_deleted + ? WHERE bvid = ?', (count, bvid))
+    # 获取上一次的真实记录
+    cursor.execute('SELECT last_known_count, total_deleted FROM tracked_videos WHERE bvid = ?', (bvid,))
+    row = cursor.fetchone()
+    
+    if row:
+        last_count, current_total_del = row
+        # 初始状态（如果是新添加的项目，先同步第一个数字）
+        if last_count == 0 and current_total_del == 0:
+            cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
+        else:
+            # 只有当开启监测且确实变少了
+            if current_count < last_count:
+                diff = last_count - current_count
+                cursor.execute('UPDATE tracked_videos SET total_deleted = total_deleted + ?, last_known_count = ? WHERE bvid = ?', 
+                               (diff, current_count, bvid))
+            else:
+                # 正常增长或持平，只同步最新状态
+                cursor.execute('UPDATE tracked_videos SET last_known_count = ? WHERE bvid = ?', (current_count, bvid))
+    
     conn.commit()
     conn.close()
 
@@ -240,9 +263,9 @@ else:
                         current_diff = s['reply'] - last['评论数']
                         growth = current_diff / time_diff if time_diff > 0 else 0
                         
-                        # 核心：精准捕捉删评 (仅在监测状态下记录，避免重复计算)
-                        if st.session_state.monitoring and current_diff < 0:
-                            update_deleted_count(v_bvid, abs(current_diff))
+                        # 核心改进：调用持久化状态机进行删评监测
+                        if st.session_state.monitoring:
+                            sync_and_detect_deletions(v_bvid, s['reply'])
                     
                     with cols[j]:
                         # 绿色/红色 Delta 区显示本次新增/减少的绝对数量
