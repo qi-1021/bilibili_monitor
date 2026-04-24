@@ -348,35 +348,43 @@ else:
 
     if not df_history.empty:
         st.divider()
-        c_l, c_r = st.columns(2)
+        import plotly.express as px
         
-        import altair as alt
+        # 统一图表配置
+        chart_config = {
+            'height': 450,
+            'template': 'plotly_dark' if st.get_option("theme.base") == "dark" else 'plotly_white'
+        }
+
+        st.markdown("### 📈 深度趋势分析 (现实时间轴)")
         
-        with c_l:
-            st.markdown("**1. 评论数增长趋势**")
-            try:
-                chart1 = alt.Chart(df_history).mark_line().encode(
-                    x=alt.X('datetime_dt:T', title='现实时间'),
-                    y=alt.Y('评论数:Q', scale=alt.Scale(zero=False)),
-                    color='视频标题:N',
-                    tooltip=['datetime_dt:T', '视频标题:N', '评论数:Q']
-                ).properties(height=400)
-                st.altair_chart(chart1, use_container_width=True)
-            except Exception as e:
-                st.error(f"图表 1 渲染失败: {e}")
-                
-        with c_r:
-            st.markdown("**2. 评论发布速度**")
-            try:
-                chart2 = alt.Chart(df_history).mark_line().encode(
-                    x=alt.X('datetime_dt:T', title='现实时间'),
-                    y=alt.Y('评论增速:Q', scale=alt.Scale(zero=False)),
-                    color='视频标题:N',
-                    tooltip=['datetime_dt:T', '视频标题:N', '评论增速:Q']
-                ).properties(height=400)
-                st.altair_chart(chart2, use_container_width=True)
-            except Exception as e:
-                st.error(f"图表 2 渲染失败: {e}")
+        # 图表 1: 累计评论数趋势
+        try:
+            fig1 = px.line(df_history, 
+                          x='datetime_dt', 
+                          y='评论数', 
+                          color='视频标题',
+                          title='1. 累计评论数实时趋势',
+                          labels={'datetime_dt': '现实时间', '评论数': '总评论数'},
+                          markers=True)
+            fig1.update_layout(xaxis_title="观测时间 (现实时间)", yaxis_title="评论总量", **chart_config)
+            st.plotly_chart(fig1, use_container_width=True)
+        except Exception as e:
+            st.error(f"趋势图 1 异常: {e}")
+
+        # 图表 2: 评论增速趋势
+        try:
+            fig2 = px.line(df_history, 
+                          x='datetime_dt', 
+                          y='评论增速', 
+                          color='视频标题',
+                          title='2. 评论发布速度变化 (条/分)',
+                          labels={'datetime_dt': '现实时间', '评论增速': '增速 (条/分)'},
+                          markers=True)
+            fig2.update_layout(xaxis_title="观测时间 (现实时间)", yaxis_title="增长速率", **chart_config)
+            st.plotly_chart(fig2, use_container_width=True)
+        except Exception as e:
+            st.error(f"趋势图 2 异常: {e}")
         
         if st.session_state.monitoring:
             time.sleep(refresh_rate)
