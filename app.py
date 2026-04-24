@@ -171,8 +171,10 @@ def get_history(limit=2000):
 
 def clear_all_history():
     conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM history")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM history")
+    # 同时清空累计删评计数器
+    cursor.execute("UPDATE tracked_videos SET total_deleted = 0")
     conn.commit()
     conn.close()
 
