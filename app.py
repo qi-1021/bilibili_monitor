@@ -17,9 +17,23 @@ st.set_page_config(
 )
 
 # --- DATABASE SETUP ---
-DB_PATH = "monitor.db"
+def get_db_path():
+    # 自动探测云端持久化路径
+    paths = [
+        "/mnt/workspace/monitor.db",  # 魔搭持久化路径
+        "/data/monitor.db",           # Hugging Face 持久化路径
+        "monitor.db"                  # 本地/回退路径
+    ]
+    for p in paths:
+        try:
+            # 检查目录是否存在且可写
+            d = os.path.dirname(p)
+            if d == "" or os.path.exists(d):
+                return p
+        except: continue
+    return "monitor.db"
 
-def init_db():
+DB_PATH = get_db_path()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     # 历史记录表
