@@ -34,6 +34,8 @@ def get_db_path():
     return "monitor.db"
 
 DB_PATH = get_db_path()
+
+def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     # 历史记录表
