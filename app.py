@@ -225,7 +225,19 @@ with st.sidebar:
         st.success(f"● 正在运行 (最后活跃: {last_hb.split()[-1]})")
     else:
         st.error(f"○ 已停止 (最后活跃: {last_hb})")
-        st.warning("提示: 如果是在云端运行，请保持页面开启或使用 Ping 工具防休眠。")
+        
+    with st.expander("☁️ 实现 24/7 不断流教程", expanded=False):
+        st.markdown("""
+        **核心原理：** 云平台检测到无访问会自动休眠。需使用外部“心跳”模拟访问。
+        
+        **步骤：**
+        1. 复制本页面浏览器地址栏的 **URL**。
+        2. 前往 [UptimeRobot](https://uptimerobot.com/) 注册免费账号。
+        3. 创建 **HTTP(s) Monitor**，粘贴 URL。
+        4. 设置频率为 **5分钟** 刷新一次。
+        
+        **✨ 效果：** 即使关掉浏览器，后台守卫也会永不停歇地为您抓取删评！
+        """)
 
     st.divider()
     st.header("1. 监测控制")
