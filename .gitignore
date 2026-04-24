@@ -2,7 +2,6 @@
 *.tar.gz
 *.pyc
 __pycache__/
-data/
 *.log
 cpolar
 frp*

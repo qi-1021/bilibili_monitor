@@ -17,23 +17,25 @@ st.set_page_config(
 )
 
 # --- DATABASE SETUP ---
-DB_PATH = "data/monitor.db"
+DB_PATH = "monitor.db"
+
 def init_db():
-    os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     # 历史记录表
     cursor.execute('''CREATE TABLE IF NOT EXISTS history 
                      (timestamp REAL, datetime TEXT, bvid TEXT, title TEXT, reply INTEGER, view INTEGER, likes INTEGER, growth REAL)''')
-    # 长期对照库表
+    # 长期对照库表 (增加 total_deleted 永久计数器)
     cursor.execute('''CREATE TABLE IF NOT EXISTS tracked_videos 
-                     (bvid TEXT PRIMARY KEY, title TEXT, is_active INTEGER DEFAULT 0)''')
+                     (bvid TEXT PRIMARY KEY, title TEXT, is_active INTEGER DEFAULT 0, total_deleted INTEGER DEFAULT 0)''')
     
-    # 迁移旧数据（如果缺少 is_active 列）
+    # 迁移旧数据（如果缺少列）
     cursor.execute("PRAGMA table_info(tracked_videos)")
     cols = [col[1] for col in cursor.fetchall()]
     if 'is_active' not in cols:
         cursor.execute("ALTER TABLE tracked_videos ADD COLUMN is_active INTEGER DEFAULT 0")
+    if 'total_deleted' not in cols:
+        cursor.execute("ALTER TABLE tracked_videos ADD COLUMN total_deleted INTEGER DEFAULT 0")
     
     conn.commit()
     conn.close()
@@ -41,7 +43,16 @@ def init_db():
 def add_tracked_video(bvid, title, is_active=1):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO tracked_videos (bvid, title, is_active) VALUES (?, ?, ?)', (bvid, title, is_active))
+    # 保持原有的 active 状态如果已存在
+    cursor.execute('INSERT OR IGNORE INTO tracked_videos (bvid, title, is_active, total_deleted) VALUES (?, ?, ?, 0)', (bvid, title, is_active))
+    cursor.execute('UPDATE tracked_videos SET title = ?, is_active = ? WHERE bvid = ?', (title, is_active, bvid))
+    conn.commit()
+    conn.close()
+
+def update_deleted_count(bvid, count):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE tracked_videos SET total_deleted = total_deleted + ? WHERE bvid = ?', (count, bvid))
     conn.commit()
     conn.close()
 
@@ -52,37 +63,29 @@ def toggle_active_video(bvid, status):
     conn.commit()
     conn.close()
 
-def remove_tracked_video(bvid):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM tracked_videos WHERE bvid = ?", (bvid,))
-    conn.commit()
-    conn.close()
-
 def get_tracked_videos(only_active=False):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     if only_active:
-        cursor.execute('SELECT bvid, title FROM tracked_videos WHERE is_active = 1')
+        cursor.execute('SELECT bvid, title, total_deleted FROM tracked_videos WHERE is_active = 1')
     else:
-        cursor.execute('SELECT bvid, title, is_active FROM tracked_videos')
+        cursor.execute('SELECT bvid, title, is_active, total_deleted FROM tracked_videos')
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 def save_history(record):
     conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-              (record['timestamp'], record['datetime'], record['bvid'], record['title'], 
-               record['reply'], record['view'], record['likes'], record['growth']))
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 
+                  (record['timestamp'], record['datetime'], record['bvid'], record['title'], 
+                   record['reply'], record['view'], record['likes'], record['growth']))
     conn.commit()
     conn.close()
 
 def get_history(limit=2000):
     if not os.path.exists(DB_PATH): return pd.DataFrame()
     conn = sqlite3.connect(DB_PATH)
-    # 使用别名将数据库列名映射回老版本的中文名称，以便图表展示一致
     df = pd.read_sql_query(f"""
         SELECT timestamp, datetime, bvid, 
                title AS 视频标题, 
@@ -94,7 +97,6 @@ def get_history(limit=2000):
     """, conn)
     conn.close()
     if not df.empty:
-        # 确保转换为绝对时间对象
         df['datetime_dt'] = pd.to_datetime(df['datetime'], format='%Y-%m-%d %H:%M:%S')
         df = df.sort_values('timestamp')
     return df
@@ -150,7 +152,7 @@ with st.sidebar:
     if not all_saved:
         st.caption("仓库空空如也")
     else:
-        for v_bvid, v_title, v_active in all_saved:
+        for v_bvid, v_title, v_active, v_del in all_saved:
             col_t, col_btn = st.columns([3, 1])
             label = "✅" if v_active else "📁"
             if col_t.button(f"{label} {v_title[:10]}", key=f"tgl_{v_bvid}"):
@@ -194,6 +196,11 @@ else:
                         last = prev_record.iloc[-1]
                         time_diff = (now.timestamp() - last['timestamp']) / 60
                         growth = (s['reply'] - last['评论数']) / time_diff if time_diff > 0 else 0
+                        
+                        # 核心改进：实时检测删评并存入永久字段
+                        if s['reply'] < last['评论数']:
+                            deleted_diff = last['评论数'] - s['reply']
+                            update_deleted_count(v_bvid, deleted_diff)
                     
                     with cols[j]:
                         st.metric(label=f"{data['title'][:10]}", 
@@ -229,56 +236,43 @@ else:
     st.divider()
     st.subheader("🛡️ 删评深度审计 (Censorship Audit)")
     
-    # 提取并细化删评事件
     audit_data = []
-    for v_bvid, v_title in active_tracked:
-        v_history = df_history[df_history['bvid'] == v_bvid].sort_values('timestamp')
-        if len(v_history) > 1:
-            v_history['diff'] = v_history['评论数'].diff()
-            v_deletions = v_history[v_history['diff'] < 0].copy()
+    # 重新获取活跃视频，这次包含最新的 total_deleted 字段
+    active_with_stats = get_tracked_videos(only_active=True)
+    for v_bvid, v_title, v_total_del in active_with_stats:
+        if v_total_del > 0:
+            v_history = df_history[df_history['bvid'] == v_bvid].sort_values('timestamp')
+            current_total = v_history.iloc[-1]['评论数'] if not v_history.empty else 0
+            del_ratio = (v_total_del / (current_total + v_total_del)) * 100 if (current_total + v_total_del) > 0 else 0
             
-            if not v_deletions.empty:
-                total_del = abs(v_deletions['diff'].sum())
-                current_total = v_history.iloc[-1]['评论数']
-                del_ratio = (total_del / (current_total + total_del)) * 100
-                
-                # 判定严重程度
-                severity = "🟢 正常"
-                color = "green"
-                if total_del > 50 or del_ratio > 5:
-                    severity = "🔴 严重清评"
-                    color = "red"
-                elif total_del > 10 or del_ratio > 1:
-                    severity = "🟡 疑似控评"
-                    color = "orange"
-                
-                audit_data.append({
-                    'BVID': v_bvid,
-                    '标题': v_title,
-                    '累计删评': int(total_del),
-                    '删评占比': f"{del_ratio:.2f}%",
-                    '严重程度': severity,
-                    'color': color,
-                    'details': v_deletions[['datetime', 'diff', '评论数']].tail(5).to_dict('records')
-                })
+            severity = "🟢 正常"
+            if v_total_del > 50 or del_ratio > 5: severity = "🔴 严重清评"
+            elif v_total_del > 10 or del_ratio > 1: severity = "🟡 疑似控评"
+            
+            # 提取具体的删评记录用于展示
+            v_deletions = v_history[v_history['评论数'].diff() < 0].tail(5)
+            
+            audit_data.append({
+                '标题': v_title,
+                '累计删评': v_total_del,
+                '删评占比': f"{del_ratio:.2f}%",
+                '严重程度': severity,
+                'details': v_deletions[['datetime', '评论数']] if not v_deletions.empty else pd.DataFrame()
+            })
 
     if not audit_data:
         st.success("✨ 暂未发现删评迹象，评论环境自然增长中。")
     else:
-        # 展示核心指标
         for audit in audit_data:
             with st.expander(f"{audit['严重程度']} | {audit['标题'][:20]}... (累计删除 {audit['累计删评']} 条)", expanded=True):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("累计被删评论", f"{audit['累计删评']} 条")
-                c2.metric("删评率 (估算)", audit['删评占比'], delta="较历史平均" if "严重" in audit['严重程度'] else None, delta_color="inverse")
+                c2.metric("删评率 (估算)", audit['删评占比'])
                 c3.write(f"**审计建议：**\n{ '该视频可能正在经历大规模人工干预或清评。' if '严重' in audit['严重程度'] else '属于正常的用户自删或平台过滤。' }")
                 
-                # 删评流水账
-                st.caption("🕒 最近删评记录 (最近 5 次)")
-                df_del_log = pd.DataFrame(audit['details'])
-                if not df_del_log.empty:
-                    df_del_log.columns = ['发生时间', '删除数量', '剩余总量']
-                    st.table(df_del_log)
+                if not audit['details'].empty:
+                    st.caption("🕒 最近删评快照")
+                    st.table(audit['details'])
 
     if not df_history.empty:
         st.divider()
