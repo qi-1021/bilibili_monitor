@@ -225,37 +225,60 @@ else:
         # 重新获取历史以包含最新数据
         df_history = get_history(limit=2000)
 
-    # --- 删评分析板块 ---
+    # --- 增强版：删评深度分析板块 ---
     st.divider()
-    st.subheader("🛡️ 删评预警分析")
+    st.subheader("🛡️ 删评深度审计 (Censorship Audit)")
     
-    # 从历史记录中提取删评事件 (当前评论数 < 上一次记录的评论数)
-    # 我们按视频分组并计算差值
-    deletion_events = []
+    # 提取并细化删评事件
+    audit_data = []
     for v_bvid, v_title in active_tracked:
         v_history = df_history[df_history['bvid'] == v_bvid].sort_values('timestamp')
         if len(v_history) > 1:
-            # 计算相邻两次采集的评论数差值
             v_history['diff'] = v_history['评论数'].diff()
-            # 过滤出差值为负的情况
-            deletions = v_history[v_history['diff'] < 0].copy()
-            if not deletions.empty:
-                total_deleted = abs(deletions['diff'].sum())
-                deletion_events.append({
-                    'title': v_title,
-                    'count': total_deleted,
-                    'last_time': deletions.iloc[-1]['datetime']
+            v_deletions = v_history[v_history['diff'] < 0].copy()
+            
+            if not v_deletions.empty:
+                total_del = abs(v_deletions['diff'].sum())
+                current_total = v_history.iloc[-1]['评论数']
+                del_ratio = (total_del / (current_total + total_del)) * 100
+                
+                # 判定严重程度
+                severity = "🟢 正常"
+                color = "green"
+                if total_del > 50 or del_ratio > 5:
+                    severity = "🔴 严重清评"
+                    color = "red"
+                elif total_del > 10 or del_ratio > 1:
+                    severity = "🟡 疑似控评"
+                    color = "orange"
+                
+                audit_data.append({
+                    'BVID': v_bvid,
+                    '标题': v_title,
+                    '累计删评': int(total_del),
+                    '删评占比': f"{del_ratio:.2f}%",
+                    '严重程度': severity,
+                    'color': color,
+                    'details': v_deletions[['datetime', 'diff', '评论数']].tail(5).to_dict('records')
                 })
-    
-    if not deletion_events:
-        st.success("✅ 暂未监测到异常删评行为 (评论总量持续增长中)")
+
+    if not audit_data:
+        st.success("✨ 暂未发现删评迹象，评论环境自然增长中。")
     else:
-        cols_del = st.columns(min(len(deletion_events), 3))
-        for idx, ev in enumerate(deletion_events):
-            with cols_del[idx % 3]:
-                st.warning(f"**{ev['title'][:10]}...**")
-                st.metric("累计删评数", f"{int(ev['count'])} 条", delta="- 异常减少", delta_color="inverse")
-                st.caption(f"最后发生: {ev['last_time']}")
+        # 展示核心指标
+        for audit in audit_data:
+            with st.expander(f"{audit['严重程度']} | {audit['标题'][:20]}... (累计删除 {audit['累计删评']} 条)", expanded=True):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("累计被删评论", f"{audit['累计删评']} 条", border=True)
+                c2.metric("删评率 (估算)", audit['删评占比'], delta="较历史平均" if "严重" in audit['严重程度'] else None, delta_color="inverse")
+                c3.write(f"**审计建议：**\n{ '该视频可能正在经历大规模人工干预或清评。' if '严重' in audit['严重程度'] else '属于正常的用户自删或平台过滤。' }")
+                
+                # 删评流水账
+                st.caption("🕒 最近删评记录 (最近 5 次)")
+                df_del_log = pd.DataFrame(audit['details'])
+                if not df_del_log.empty:
+                    df_del_log.columns = ['发生时间', '删除数量', '剩余总量']
+                    st.table(df_del_log)
 
     if not df_history.empty:
         st.divider()
